@@ -1,7 +1,6 @@
 import { ArrowUpRight, FileText, FolderOpen, UploadCloud } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-const STORAGE_KEY = 'revision-platform.subjects.v1';
 const SUPPORTED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'md', 'odt']);
 
 const SUPABASE_URL = 'https://ssqqsjziknqhwdufgduv.supabase.co';
@@ -155,20 +154,6 @@ const normalizeSubject = (subject) => {
 };
 
 
-const loadSubjects = () => {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed.map(normalizeSubject).filter(Boolean);
-  } catch {
-    return [];
-  }
-};
-
 const toRemoteSubject = (subject) => ({
   id: subject.id,
   title: subject.title,
@@ -290,15 +275,11 @@ const downloadHrefForAttachment = (attachment) => {
 };
 
 export default function App() {
-  const [subjects, setSubjects] = useState(() => loadSubjects());
+  const [subjects, setSubjects] = useState([]);
   const [subjectTitle, setSubjectTitle] = useState('');
   const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const [openedSubject, setOpenedSubject] = useState(null);
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(subjects));
-  }, [subjects]);
 
   useEffect(() => {
     let canceled = false;
@@ -306,11 +287,13 @@ export default function App() {
     const syncFromRemote = async () => {
       try {
         const remoteSubjects = await fetchRemoteSubjects();
-        if (!canceled && remoteSubjects.length) {
+        if (!canceled) {
           setSubjects(remoteSubjects);
         }
       } catch {
-        // Local fallback already active through localStorage.
+        if (!canceled) {
+          setSubjects([]);
+        }
       }
     };
 
@@ -360,30 +343,34 @@ export default function App() {
     await mergeSelectedDocuments(droppedFiles);
   };
 
-  const handleCreateSubject = () => {
+  const handleCreateSubject = async () => {
     const normalizedTitle = subjectTitle.trim();
     if (!normalizedTitle || !selectedDocuments.length) return;
 
     const nextSubject = createSubject(normalizedTitle, selectedDocuments);
-    setSubjects((current) => [nextSubject, ...current]);
-    setSubjectTitle('');
-    setSelectedDocuments([]);
 
-    void pushRemoteSubject(nextSubject).catch(() => {
-      // Keep local state if remote sync fails.
-    });
+    try {
+      await pushRemoteSubject(nextSubject);
+      setSubjects((current) => [nextSubject, ...current]);
+      setSubjectTitle('');
+      setSelectedDocuments([]);
+    } catch {
+      // BD-only mode: no local persistence fallback.
+    }
   };
 
-  const handleDeleteOpenedSubject = () => {
+  const handleDeleteOpenedSubject = async () => {
     if (!openedSubject) return;
 
     const idToDelete = openedSubject.id;
-    setSubjects((current) => current.filter((subject) => subject.id !== idToDelete));
-    setOpenedSubject(null);
 
-    void deleteRemoteSubject(idToDelete).catch(() => {
-      // Keep local state if remote sync fails.
-    });
+    try {
+      await deleteRemoteSubject(idToDelete);
+      setSubjects((current) => current.filter((subject) => subject.id !== idToDelete));
+      setOpenedSubject(null);
+    } catch {
+      // BD-only mode: keep current UI state when remote deletion fails.
+    }
   };
 
 
