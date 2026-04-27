@@ -275,6 +275,13 @@ export default function App() {
     setSelectedDocuments([]);
   };
 
+  const handleDeleteOpenedSubject = () => {
+    if (!openedSubject) return;
+
+    setSubjects((current) => current.filter((subject) => subject.id !== openedSubject.id));
+    setOpenedSubject(null);
+  };
+
   return (
     <main className="shell">
       <nav className="nav" aria-label="Navigation principale">
@@ -429,9 +436,14 @@ export default function App() {
           >
             <div className="floating-header">
               <h3>Détails du sujet</h3>
-              <button type="button" className="close-button" onClick={() => setOpenedSubject(null)}>
-                Fermer
-              </button>
+              <div className="floating-header-actions">
+                <button type="button" className="delete-button" onClick={handleDeleteOpenedSubject}>
+                  Supprimer ce sujet
+                </button>
+                <button type="button" className="close-button" onClick={() => setOpenedSubject(null)}>
+                  Fermer
+                </button>
+              </div>
             </div>
 
             <p className="floating-title">{openedSubject.title}</p>

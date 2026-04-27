@@ -131,6 +131,40 @@ describe('Revision platform - étape 2 data coherence', () => {
     expect(fileLink.getAttribute('href')).toContain('data:application/pdf;base64,JVBERi0xLjQK');
   });
 
+  it('deletes a subject from the floating detail window', () => {
+    window.localStorage.setItem(
+      SUBJECTS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 's-delete',
+          title: 'Sujet à supprimer',
+          documents: ['annale.pdf'],
+          attachments: [
+            {
+              name: 'annale.pdf',
+              type: 'application/pdf',
+              size: 1024,
+              dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK',
+            },
+          ],
+          createdAt: '2026-04-27T11:00:00.000Z',
+        },
+      ]),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /ouvrir les détails de sujet à supprimer/i }));
+    fireEvent.click(screen.getByRole('button', { name: /supprimer ce sujet/i }));
+
+    expect(screen.queryByRole('dialog', { name: /détails du sujet/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/sujet à supprimer/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/aucun sujet pour le moment/i)).toBeInTheDocument();
+
+    const stored = JSON.parse(window.localStorage.getItem(SUBJECTS_STORAGE_KEY));
+    expect(stored).toHaveLength(0);
+  });
+
   it('stores real file payload and exposes a non-corrupted download link for newly created subjects', async () => {
     render(<App />);
 

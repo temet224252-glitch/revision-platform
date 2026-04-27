@@ -355,13 +355,26 @@ h2 {
   letter-spacing: -0.5px;
 }
 
-.close-button {
+.floating-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.close-button,
+.delete-button {
   border: 0;
   border-radius: 8px;
   padding: 6px 10px;
-  background: #171717;
   color: #fff;
   cursor: pointer;
+}
+
+.close-button {
+  background: #171717;
+}
+
+.delete-button {
+  background: #d92d20;
 }
 
 .floating-title {
