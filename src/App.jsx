@@ -7,6 +7,7 @@ const SUPPORTED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt'
 const documentCountLabel = (count) => `${count} document${count > 1 ? 's' : ''}`;
 
 const extensionFromName = (name = '') => {
+  if (typeof name !== 'string') return '';
   const chunks = name.toLowerCase().split('.');
   return chunks.length > 1 ? chunks.at(-1) : '';
 };
@@ -20,13 +21,6 @@ const mimeFromExtension = (ext) => {
   if (ext === 'txt') return 'text/plain';
   if (ext === 'md') return 'text/markdown';
   return 'application/octet-stream';
-};
-
-const downloadHrefForName = (filename) => {
-  const ext = extensionFromName(filename);
-  const mime = mimeFromExtension(ext);
-  const payload = encodeURIComponent(`Document: ${filename}`);
-  return `data:${mime};charset=utf-8,${payload}`;
 };
 
 const primaryFormatFromDocuments = (documents = []) => {
@@ -48,9 +42,7 @@ const formatDate = (isoDate) => {
 };
 
 const isSupportedDocument = (file) => {
-  if (!file || !file.name) {
-    return false;
-  }
+  if (!file || !file.name) return false;
 
   const lowerName = file.name.toLowerCase();
   if (file.type === 'application/pdf' || lowerName.endsWith('.pdf')) {
@@ -61,37 +53,101 @@ const isSupportedDocument = (file) => {
   return SUPPORTED_EXTENSIONS.has(extension);
 };
 
-const dedupeDocumentNames = (files) => {
-  const names = files.filter(isSupportedDocument).map((file) => file.name);
-  return [...new Set(names)];
+const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+  reader.onerror = () => reject(reader.error || new Error('Unable to read file'));
+  reader.readAsDataURL(file);
+});
+
+const attachmentKey = (attachment) => `${attachment.name}::${attachment.size ?? 0}`;
+
+const normalizeAttachment = (attachmentLike) => {
+  if (!attachmentLike) return null;
+
+  if (typeof attachmentLike === 'string') {
+    const ext = extensionFromName(attachmentLike);
+    return {
+      name: attachmentLike,
+      type: mimeFromExtension(ext),
+      size: null,
+      dataUrl: null,
+    };
+  }
+
+  if (typeof attachmentLike === 'object' && typeof attachmentLike.name === 'string' && attachmentLike.name) {
+    const ext = extensionFromName(attachmentLike.name);
+    return {
+      name: attachmentLike.name,
+      type: typeof attachmentLike.type === 'string' && attachmentLike.type
+        ? attachmentLike.type
+        : mimeFromExtension(ext),
+      size: typeof attachmentLike.size === 'number' ? attachmentLike.size : null,
+      dataUrl: typeof attachmentLike.dataUrl === 'string' ? attachmentLike.dataUrl : null,
+    };
+  }
+
+  return null;
 };
 
-const createSubject = (title, documents) => ({
-  id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-  title,
-  documents,
-  createdAt: new Date().toISOString(),
-});
+const dedupeAttachments = (attachments = []) => {
+  const byKey = new Map();
+
+  attachments
+    .map(normalizeAttachment)
+    .filter(Boolean)
+    .forEach((attachment) => {
+      const key = attachmentKey(attachment);
+      const existing = byKey.get(key);
+      if (!existing || (!existing.dataUrl && attachment.dataUrl)) {
+        byKey.set(key, attachment);
+      }
+    });
+
+  return [...byKey.values()];
+};
+
+const createSubject = (title, attachments) => {
+  const normalizedAttachments = dedupeAttachments(attachments);
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    title,
+    documents: normalizedAttachments.map((attachment) => attachment.name),
+    attachments: normalizedAttachments,
+    createdAt: new Date().toISOString(),
+  };
+};
+
+const normalizeSubject = (subject) => {
+  if (!subject || typeof subject !== 'object') return null;
+  if (typeof subject.id !== 'string' || typeof subject.title !== 'string' || typeof subject.createdAt !== 'string') {
+    return null;
+  }
+
+  const rawDocuments = Array.isArray(subject.documents) ? subject.documents : [];
+  const docsFromDocuments = dedupeAttachments(rawDocuments);
+  const docsFromAttachments = dedupeAttachments(Array.isArray(subject.attachments) ? subject.attachments : []);
+  const mergedAttachments = dedupeAttachments([...docsFromDocuments, ...docsFromAttachments]);
+  const documentNames = [...new Set(mergedAttachments.map((attachment) => attachment.name))];
+
+  return {
+    id: subject.id,
+    title: subject.title,
+    createdAt: subject.createdAt,
+    documents: documentNames,
+    attachments: mergedAttachments,
+  };
+};
 
 const loadSubjects = () => {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
+    if (!raw) return [];
 
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
+    if (!Array.isArray(parsed)) return [];
 
-    return parsed.filter((subject) => (
-      subject
-      && typeof subject.id === 'string'
-      && typeof subject.title === 'string'
-      && Array.isArray(subject.documents)
-      && typeof subject.createdAt === 'string'
-    ));
+    return parsed.map(normalizeSubject).filter(Boolean);
   } catch {
     return [];
   }
@@ -105,9 +161,7 @@ const readDirectoryEntries = async (reader) => {
       reader.readEntries(resolve, () => resolve([]));
     });
 
-    if (!chunk.length) {
-      return;
-    }
+    if (!chunk.length) return;
 
     collected.push(...chunk);
     await loop();
@@ -118,9 +172,7 @@ const readDirectoryEntries = async (reader) => {
 };
 
 const filesFromEntry = async (entry) => {
-  if (!entry) {
-    return [];
-  }
+  if (!entry) return [];
 
   if (entry.isFile) {
     return new Promise((resolve) => {
@@ -139,9 +191,7 @@ const filesFromEntry = async (entry) => {
 };
 
 const extractDropFiles = async (dataTransfer) => {
-  if (!dataTransfer) {
-    return [];
-  }
+  if (!dataTransfer) return [];
 
   const items = Array.from(dataTransfer.items ?? []);
   const entries = items
@@ -154,6 +204,15 @@ const extractDropFiles = async (dataTransfer) => {
   }
 
   return Array.from(dataTransfer.files ?? []);
+};
+
+const downloadHrefForAttachment = (attachment) => {
+  if (attachment?.dataUrl) return attachment.dataUrl;
+
+  const ext = extensionFromName(attachment?.name || '');
+  const mime = attachment?.type || mimeFromExtension(ext);
+  const payload = encodeURIComponent(`Document: ${attachment?.name || 'fichier'}`);
+  return `data:${mime};charset=utf-8,${payload}`;
 };
 
 export default function App() {
@@ -172,22 +231,29 @@ export default function App() {
     [selectedDocuments.length],
   );
 
-  const mergeSelectedDocuments = (incomingFiles) => {
-    const incomingNames = dedupeDocumentNames(Array.from(incomingFiles));
-    if (!incomingNames.length) {
-      return;
-    }
+  const mergeSelectedDocuments = async (incomingFiles) => {
+    const supportedFiles = Array.from(incomingFiles ?? []).filter(isSupportedDocument);
+    if (!supportedFiles.length) return;
 
-    setSelectedDocuments((current) => [...new Set([...current, ...incomingNames])]);
+    const newAttachments = await Promise.all(
+      supportedFiles.map(async (file) => ({
+        name: file.name,
+        type: file.type || mimeFromExtension(extensionFromName(file.name)),
+        size: file.size,
+        dataUrl: await readFileAsDataUrl(file),
+      })),
+    );
+
+    setSelectedDocuments((current) => dedupeAttachments([...current, ...newAttachments]));
   };
 
-  const handlePdfSelection = (event) => {
-    mergeSelectedDocuments(event.target.files ?? []);
+  const handlePdfSelection = async (event) => {
+    await mergeSelectedDocuments(event.target.files ?? []);
     event.target.value = '';
   };
 
-  const handleFolderSelection = (event) => {
-    mergeSelectedDocuments(event.target.files ?? []);
+  const handleFolderSelection = async (event) => {
+    await mergeSelectedDocuments(event.target.files ?? []);
     event.target.value = '';
   };
 
@@ -196,14 +262,12 @@ export default function App() {
     setDragActive(false);
 
     const droppedFiles = await extractDropFiles(event.dataTransfer);
-    mergeSelectedDocuments(droppedFiles);
+    await mergeSelectedDocuments(droppedFiles);
   };
 
   const handleCreateSubject = () => {
     const normalizedTitle = subjectTitle.trim();
-    if (!normalizedTitle || !selectedDocuments.length) {
-      return;
-    }
+    if (!normalizedTitle || !selectedDocuments.length) return;
 
     const nextSubject = createSubject(normalizedTitle, selectedDocuments);
     setSubjects((current) => [nextSubject, ...current]);
@@ -381,9 +445,9 @@ export default function App() {
             <div className="attachment-panel">
               <p className="attachment-title">Fichiers joints</p>
               <ul>
-                {openedSubject.documents.map((filename) => (
-                  <li key={filename}>
-                    <a href={downloadHrefForName(filename)} download={filename}>{filename}</a>
+                {openedSubject.attachments.map((attachment) => (
+                  <li key={attachmentKey(attachment)}>
+                    <a href={downloadHrefForAttachment(attachment)} download={attachment.name}>{attachment.name}</a>
                   </li>
                 ))}
               </ul>

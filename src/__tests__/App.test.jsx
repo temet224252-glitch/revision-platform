@@ -21,7 +21,7 @@ describe('Revision platform - étape 2 data coherence', () => {
     expect(screen.queryByText(/bases de données/i)).not.toBeInTheDocument();
   });
 
-  it('creates and persists a subject from one or several selected PDFs', () => {
+  it('creates and persists a subject from one or several selected PDFs', async () => {
     render(<App />);
 
     fireEvent.change(screen.getByLabelText(/nom du sujet/i), {
@@ -33,9 +33,10 @@ describe('Revision platform - étape 2 data coherence', () => {
     const f2 = new File(['beta'], 'annales-systemes.pdf', { type: 'application/pdf' });
     fireEvent.change(fileInput, { target: { files: [f1, f2] } });
 
+    await screen.findByText(/2 documents sélectionnés/i);
     fireEvent.click(screen.getByRole('button', { name: /ajouter le sujet/i }));
 
-    expect(screen.getByText(/sujet réseau et systèmes/i)).toBeInTheDocument();
+    expect(await screen.findByText(/sujet réseau et systèmes/i)).toBeInTheDocument();
     expect(screen.getByText(/2 documents/i)).toBeInTheDocument();
 
     const stored = JSON.parse(window.localStorage.getItem(SUBJECTS_STORAGE_KEY));
@@ -96,7 +97,20 @@ describe('Revision platform - étape 2 data coherence', () => {
         {
           id: 's2',
           title: 'Sujet Réseaux avancé',
-          documents: ['annale-2025.pdf', 'slides-tcpip.pdf'],
+          documents: [
+            {
+              name: 'annale-2025.pdf',
+              type: 'application/pdf',
+              size: 1024,
+              dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK',
+            },
+            {
+              name: 'slides-tcpip.pdf',
+              type: 'application/pdf',
+              size: 2048,
+              dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK',
+            },
+          ],
           createdAt: '2026-04-27T11:00:00.000Z',
         },
       ]),
@@ -114,6 +128,30 @@ describe('Revision platform - étape 2 data coherence', () => {
 
     const fileLink = screen.getByRole('link', { name: /annale-2025.pdf/i });
     expect(fileLink).toHaveAttribute('download', 'annale-2025.pdf');
-    expect(fileLink.getAttribute('href')).toContain('data:application/pdf');
+    expect(fileLink.getAttribute('href')).toContain('data:application/pdf;base64,JVBERi0xLjQK');
+  });
+
+  it('stores real file payload and exposes a non-corrupted download link for newly created subjects', async () => {
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText(/nom du sujet/i), {
+      target: { value: 'Sujet PDF réel' },
+    });
+
+    const pdfInput = screen.getByLabelText(/sélectionner un ou plusieurs pdf/i, { selector: 'input' });
+    const pdfContent = '%PDF-1.4\nmini test content';
+    const file = new File([pdfContent], 'real-file.pdf', { type: 'application/pdf' });
+    fireEvent.change(pdfInput, { target: { files: [file] } });
+
+    await screen.findByText(/1 document sélectionné/i);
+    fireEvent.click(screen.getByRole('button', { name: /ajouter le sujet/i }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /ouvrir les détails de sujet pdf réel/i }));
+
+    const link = screen.getByRole('link', { name: /real-file.pdf/i });
+    const href = link.getAttribute('href') || '';
+
+    expect(href.startsWith('data:application/pdf;base64,')).toBe(true);
+    expect(href).toContain('JVBERi0xLjQK');
   });
 });
