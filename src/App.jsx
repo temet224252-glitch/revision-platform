@@ -4,6 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 const STORAGE_KEY = 'revision-platform.subjects.v1';
 const SUPPORTED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'md', 'odt']);
 
+const SUPABASE_URL = 'https://ssqqsjziknqhwdufgduv.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNzcXFzanppa25xaHdkdWZnZHV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyOTUzNTQsImV4cCI6MjA5Mjg3MTM1NH0.zMI-UBQDsYLCiSH6BDXt1BsCXpr5t5tO2PatcnIjBQs';
+const SUPABASE_TABLE = 'revision_subjects';
+const SUPABASE_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const SUPABASE_SELECT = 'id,title,created_at,documents,attachments';
+const SUPABASE_HEADERS = {
+  apikey: SUPABASE_ANON_KEY,
+  Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+};
+
 const documentCountLabel = (count) => `${count} document${count > 1 ? 's' : ''}`;
 
 const extensionFromName = (name = '') => {
@@ -120,7 +130,12 @@ const createSubject = (title, attachments) => {
 
 const normalizeSubject = (subject) => {
   if (!subject || typeof subject !== 'object') return null;
-  if (typeof subject.id !== 'string' || typeof subject.title !== 'string' || typeof subject.createdAt !== 'string') {
+
+  const createdAtCandidate = typeof subject.createdAt === 'string'
+    ? subject.createdAt
+    : (typeof subject.created_at === 'string' ? subject.created_at : null);
+
+  if (typeof subject.id !== 'string' || typeof subject.title !== 'string' || !createdAtCandidate) {
     return null;
   }
 
@@ -133,11 +148,12 @@ const normalizeSubject = (subject) => {
   return {
     id: subject.id,
     title: subject.title,
-    createdAt: subject.createdAt,
+    createdAt: createdAtCandidate,
     documents: documentNames,
     attachments: mergedAttachments,
   };
 };
+
 
 const loadSubjects = () => {
   try {
@@ -150,6 +166,64 @@ const loadSubjects = () => {
     return parsed.map(normalizeSubject).filter(Boolean);
   } catch {
     return [];
+  }
+};
+
+const toRemoteSubject = (subject) => ({
+  id: subject.id,
+  title: subject.title,
+  created_at: subject.createdAt,
+  documents: subject.documents,
+  attachments: subject.attachments,
+});
+
+const fetchRemoteSubjects = async () => {
+  if (!SUPABASE_ENABLED) return [];
+
+  const response = await fetch(
+    `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=${encodeURIComponent(SUPABASE_SELECT)}&order=created_at.desc`,
+    {
+      method: 'GET',
+      headers: SUPABASE_HEADERS,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch remote subjects');
+  }
+
+  const rows = await response.json();
+  return (Array.isArray(rows) ? rows : []).map(normalizeSubject).filter(Boolean);
+};
+
+const pushRemoteSubject = async (subject) => {
+  if (!SUPABASE_ENABLED) return;
+
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}`, {
+    method: 'POST',
+    headers: {
+      ...SUPABASE_HEADERS,
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates',
+    },
+    body: JSON.stringify(toRemoteSubject(subject)),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to push remote subject');
+  }
+};
+
+const deleteRemoteSubject = async (id) => {
+  if (!SUPABASE_ENABLED) return;
+
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: SUPABASE_HEADERS,
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to delete remote subject');
   }
 };
 
@@ -226,6 +300,27 @@ export default function App() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(subjects));
   }, [subjects]);
 
+  useEffect(() => {
+    let canceled = false;
+
+    const syncFromRemote = async () => {
+      try {
+        const remoteSubjects = await fetchRemoteSubjects();
+        if (!canceled && remoteSubjects.length) {
+          setSubjects(remoteSubjects);
+        }
+      } catch {
+        // Local fallback already active through localStorage.
+      }
+    };
+
+    void syncFromRemote();
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
   const selectedCountLabel = useMemo(
     () => `${documentCountLabel(selectedDocuments.length)} sélectionné${selectedDocuments.length > 1 ? 's' : ''}`,
     [selectedDocuments.length],
@@ -273,14 +368,24 @@ export default function App() {
     setSubjects((current) => [nextSubject, ...current]);
     setSubjectTitle('');
     setSelectedDocuments([]);
+
+    void pushRemoteSubject(nextSubject).catch(() => {
+      // Keep local state if remote sync fails.
+    });
   };
 
   const handleDeleteOpenedSubject = () => {
     if (!openedSubject) return;
 
-    setSubjects((current) => current.filter((subject) => subject.id !== openedSubject.id));
+    const idToDelete = openedSubject.id;
+    setSubjects((current) => current.filter((subject) => subject.id !== idToDelete));
     setOpenedSubject(null);
+
+    void deleteRemoteSubject(idToDelete).catch(() => {
+      // Keep local state if remote sync fails.
+    });
   };
+
 
   return (
     <main className="shell">

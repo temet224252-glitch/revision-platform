@@ -1,16 +1,21 @@
 import '@testing-library/jest-dom/vitest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App.jsx';
 
 const SUBJECTS_STORAGE_KEY = 'revision-platform.subjects.v1';
+const originalFetch = global.fetch;
 
 describe('Revision platform - étape 2 data coherence', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    global.fetch = vi.fn().mockRejectedValue(new Error('offline'));
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    global.fetch = originalFetch;
+  });
 
   it('starts with no hardcoded previous subjects and shows an empty state', () => {
     render(<App />);
@@ -163,6 +168,69 @@ describe('Revision platform - étape 2 data coherence', () => {
 
     const stored = JSON.parse(window.localStorage.getItem(SUBJECTS_STORAGE_KEY));
     expect(stored).toHaveLength(0);
+  });
+
+  it('loads remote subjects from Supabase when API is available', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ([
+        {
+          id: 'remote-1',
+          title: 'Sujet distant',
+          created_at: '2026-04-27T12:00:00.000Z',
+          documents: ['dist.pdf'],
+          attachments: [{ name: 'dist.pdf', type: 'application/pdf', size: 500, dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK' }],
+        },
+      ]),
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText(/sujet distant/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/rest/v1/revision_subjects?select='),
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+  });
+
+  it('pushes create and delete operations to Supabase API', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText(/nom du sujet/i), {
+      target: { value: 'Sujet sync cloud' },
+    });
+
+    const pdfInput = screen.getByLabelText(/sélectionner un ou plusieurs pdf/i, { selector: 'input' });
+    const file = new File(['content'], 'cloud.pdf', { type: 'application/pdf' });
+    fireEvent.change(pdfInput, { target: { files: [file] } });
+
+    await screen.findByText(/1 document sélectionné/i);
+    fireEvent.click(screen.getByRole('button', { name: /ajouter le sujet/i }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/rest/v1/revision_subjects'),
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /ouvrir les détails de sujet sync cloud/i }));
+    fireEvent.click(screen.getByRole('button', { name: /supprimer ce sujet/i }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/rest/v1/revision_subjects?id=eq.'),
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
   });
 
   it('stores real file payload and exposes a non-corrupted download link for newly created subjects', async () => {
