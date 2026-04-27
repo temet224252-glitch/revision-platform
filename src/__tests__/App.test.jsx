@@ -245,36 +245,62 @@ describe('Revision platform - étape 2 data coherence', () => {
     expect(screen.getByText(/aucun sujet pour le moment/i)).toBeInTheDocument();
   });
 
-  it('opens a study workspace and generates a first visual interactive revision path', async () => {
+  it('opens a full-page revision course without hardcoded Pythagore for another subject', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ([
         {
-          id: 'pythagore-1',
-          title: 'Théorème de Pythagore',
+          id: 'network-1',
+          title: 'Réseaux et routage',
           created_at: '2026-04-27T12:00:00.000Z',
-          documents: ['pythagore.pdf'],
-          attachments: [{ name: 'pythagore.pdf', type: 'application/pdf', size: 500, dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK' }],
+          documents: ['routage-ip.pdf'],
+          attachments: [{ name: 'routage-ip.pdf', type: 'application/pdf', size: 500, dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK' }],
         },
       ]),
     });
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /ouvrir les détails de théorème de pythagore/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /ouvrir les détails de réseaux et routage/i }));
 
-    expect(screen.getByRole('heading', { name: /atelier de révision/i })).toBeInTheDocument();
-    expect(screen.getByText(/texte clair \+ jeux visuels/i)).toBeInTheDocument();
+    expect(screen.getByRole('main', { name: /parcours de révision/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /réseaux et routage/i, level: 1 })).toBeInTheDocument();
+    expect(screen.getAllByText(/parcours prêt/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /lancer le parcours/i })).toBeInTheDocument();
+    expect(screen.queryByText(/pythagore/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /générer le parcours interactif/i }));
+    fireEvent.click(screen.getByRole('button', { name: /lancer le parcours/i }));
 
-    expect(await screen.findByText(/parcours visuel prêt/i)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /comprendre sans blabla/i })).toBeInTheDocument();
-    expect(screen.getByText(/simulateur visuel/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/côté a/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/côté b/i)).toBeInTheDocument();
-    expect(screen.getByText(/mini-jeu de matching/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /valider les associations/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /cours visuel/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/routage-ip\.pdf/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/atelier interactif/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/réseaux et routage/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /valider l'activité/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/côté a/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/côté b/i)).not.toBeInTheDocument();
+  });
+
+  it('auto-prepares a revision path after creating a subject from uploaded PDFs', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] });
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText(/nom du sujet/i), {
+      target: { value: 'Graphes complets' },
+    });
+
+    const pdfInput = screen.getByLabelText(/sélectionner un ou plusieurs pdf/i, { selector: 'input' });
+    fireEvent.change(pdfInput, { target: { files: [new File(['graphes'], 'cours-graphes.pdf', { type: 'application/pdf' })] } });
+
+    await screen.findByText(/1 document sélectionné/i);
+    fireEvent.click(screen.getByRole('button', { name: /ajouter le sujet/i }));
+
+    expect(await screen.findByText(/parcours prêt/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /ouvrir les détails de graphes complets/i }));
+    expect(screen.getByRole('main', { name: /parcours de révision/i })).toBeInTheDocument();
   });
 
   it('stores real file payload and exposes a non-corrupted download link for newly created subjects', async () => {

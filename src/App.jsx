@@ -274,20 +274,36 @@ const downloadHrefForAttachment = (attachment) => {
   return `data:${mime};charset=utf-8,${payload}`;
 };
 
-const buildStarterRevisionPath = (subject) => ({
-  title: subject.title,
-  status: 'Parcours visuel prêt',
-  essentials: [
-    'On part de zéro. Une idée par bloc.',
-    'Formule ou règle centrale en premier. Exceptions après.',
-    'Chaque notion doit être manipulée, pas seulement lue.',
-  ],
-  matches: [
-    ['Hypoténuse', 'Côté le plus long, face à l’angle droit'],
-    ['Carré', 'Aire construite sur un côté'],
-    ['Validation', 'Retour immédiat vert ou rouge'],
-  ],
-});
+const humanizeDocumentName = (name = '') => name
+  .replace(/\.[^.]+$/, '')
+  .replace(/[-_]+/g, ' ')
+  .trim();
+
+const buildStarterRevisionPath = (subject) => {
+  const documentTopics = subject.documents.map(humanizeDocumentName).filter(Boolean);
+  const topicSource = [subject.title, ...documentTopics].join(' · ');
+
+  return {
+    title: subject.title,
+    status: 'Parcours prêt',
+    source: topicSource,
+    essentials: [
+      `Comprendre ${subject.title} depuis les documents déposés.`,
+      'Retenir les règles utiles avant les détails.',
+      'Manipuler une situation visuelle, puis valider avec retour immédiat.',
+    ],
+    activity: {
+      prompt: `Construis une représentation visuelle de ${subject.title}, puis vérifie chaque lien important.`,
+      firstBlock: documentTopics[0] || subject.title,
+      secondBlock: documentTopics[1] || 'idée clé du cours',
+    },
+    matches: [
+      [subject.title, 'Sujet principal à maîtriser'],
+      [documentTopics[0] || 'Document source', 'Base du cours généré'],
+      ['Validation', 'Retour vert ou rouge selon la réponse'],
+    ],
+  };
+};
 
 export default function App() {
   const [subjects, setSubjects] = useState([]);
@@ -295,9 +311,9 @@ export default function App() {
   const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const [openedSubject, setOpenedSubject] = useState(null);
+  const [generatedPaths, setGeneratedPaths] = useState({});
   const [generatedPath, setGeneratedPath] = useState(null);
-  const [pythagoreA, setPythagoreA] = useState(3);
-  const [pythagoreB, setPythagoreB] = useState(4);
+  const [pathStarted, setPathStarted] = useState(false);
   const [matchFeedback, setMatchFeedback] = useState('');
 
   useEffect(() => {
@@ -328,20 +344,17 @@ export default function App() {
     [selectedDocuments.length],
   );
 
-  const pythagoreC = Math.sqrt((pythagoreA ** 2) + (pythagoreB ** 2)).toFixed(2);
-  const pythagoreAreaC = ((pythagoreA ** 2) + (pythagoreB ** 2)).toFixed(0);
-
   const openSubjectWorkspace = (subject) => {
+    const path = generatedPaths[subject.id] || buildStarterRevisionPath(subject);
+    setGeneratedPaths((current) => ({ ...current, [subject.id]: path }));
     setOpenedSubject(subject);
-    setGeneratedPath(null);
+    setGeneratedPath(path);
+    setPathStarted(false);
     setMatchFeedback('');
-    setPythagoreA(3);
-    setPythagoreB(4);
   };
 
-  const handleGenerateRevisionPath = () => {
-    if (!openedSubject) return;
-    setGeneratedPath(buildStarterRevisionPath(openedSubject));
+  const handleStartRevisionPath = () => {
+    setPathStarted(true);
   };
 
   const handleValidateMatching = () => {
@@ -390,6 +403,8 @@ export default function App() {
 
     try {
       await pushRemoteSubject(nextSubject);
+      const path = buildStarterRevisionPath(nextSubject);
+      setGeneratedPaths((current) => ({ ...current, [nextSubject.id]: path }));
       setSubjects((current) => [nextSubject, ...current]);
       setSubjectTitle('');
       setSelectedDocuments([]);
@@ -469,6 +484,7 @@ export default function App() {
                     </p>
                     <h3>{subject.title}</h3>
                     <p className="subject-documents">{subject.documents.join(' · ')}</p>
+                    {generatedPaths[subject.id] && <span className="ready-pill">Parcours prêt</span>}
                   </div>
                   <ArrowUpRight className="subject-arrow" size={17} aria-hidden="true" />
                 </button>
@@ -556,109 +572,37 @@ export default function App() {
         </section>
       </section>
 
-      {openedSubject && (
-        <div className="floating-overlay" role="presentation" onClick={() => setOpenedSubject(null)}>
-          <section
-            className="floating-window study-window"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Détails du sujet"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="floating-header">
-              <div>
-                <p className="eyebrow muted">Texte clair + jeux visuels</p>
-                <h3>Atelier de révision</h3>
-              </div>
-              <div className="floating-header-actions">
-                <button type="button" className="delete-button" onClick={handleDeleteOpenedSubject}>
-                  Supprimer ce sujet
-                </button>
-                <button type="button" className="close-button" onClick={() => setOpenedSubject(null)}>
-                  Fermer
-                </button>
-              </div>
-            </div>
+      {openedSubject && generatedPath && (
+        <section role="main" aria-label="Parcours de révision" className="revision-page">
+          <div className="revision-topbar">
+            <button type="button" className="button secondary" onClick={() => setOpenedSubject(null)}>
+              Retour aux sujets
+            </button>
+            <button type="button" className="delete-button" onClick={handleDeleteOpenedSubject}>
+              Supprimer ce sujet
+            </button>
+          </div>
 
-            <p className="floating-title">{openedSubject.title}</p>
-
+          <section role="dialog" aria-label="Détails du sujet" className="revision-hero">
+            <p className="eyebrow muted">Parcours de révision généré</p>
+            <h1>{openedSubject.title}</h1>
+            <p className="hero-copy">{generatedPath.source}</p>
             <div className="floating-info-grid">
               <p><strong>Date de création</strong><span>{formatDate(openedSubject.createdAt)}</span></p>
               <p><strong>Nombre de documents</strong><span>{documentCountLabel(openedSubject.documents.length)}</span></p>
               <p><strong>Format principal</strong><span>{primaryFormatFromDocuments(openedSubject.documents)}</span></p>
             </div>
-
-            <div className="study-intro">
-              <div>
-                <p className="attachment-title">Génération IA prévue</p>
-                <p>Première brique : produire un parcours lisible, visuel, rejouable, avec interactions adaptées au sujet.</p>
-              </div>
-              <button type="button" className="button primary" onClick={handleGenerateRevisionPath}>
-                Générer le parcours interactif
-              </button>
+            <div className="revision-status-row">
+              <span className="generation-status">{generatedPath.status}</span>
+              <span>{documentCountLabel(openedSubject.documents.length)}</span>
+              <span>{primaryFormatFromDocuments(openedSubject.documents)}</span>
             </div>
-
-            {generatedPath && (
-              <div className="study-path" aria-label="Parcours de révision généré">
-                <p className="generation-status">{generatedPath.status}</p>
-
-                <section className="lesson-card">
-                  <p className="eyebrow muted">Cours</p>
-                  <h3>Comprendre sans blabla</h3>
-                  <p>
-                    On garde uniquement ce qui aide à résoudre. La règle principale vient d’abord,
-                    puis une image mentale, puis une manipulation.
-                  </p>
-                  <ul className="key-list">
-                    {generatedPath.essentials.map((item) => <li key={item}>{item}</li>)}
-                  </ul>
-                </section>
-
-                <section className="interactive-card">
-                  <div>
-                    <p className="eyebrow muted">Simulateur visuel</p>
-                    <h3>Pythagore manipulable</h3>
-                    <p>Change les côtés. Les carrés suivent. L’hypoténuse se recalcule.</p>
-                  </div>
-                  <div className="pythagore-lab">
-                    <div className="triangle-stage" aria-label="animation pythagore">
-                      <div className="square square-a" style={{ width: `${pythagoreA * 12}px`, height: `${pythagoreA * 12}px` }}>a²</div>
-                      <div className="triangle-shape" />
-                      <div className="square square-b" style={{ width: `${pythagoreB * 12}px`, height: `${pythagoreB * 12}px` }}>b²</div>
-                      <div className="square square-c">c² = {pythagoreAreaC}</div>
-                    </div>
-                    <label>
-                      Côté A
-                      <input aria-label="Côté A" type="range" min="1" max="8" value={pythagoreA} onChange={(event) => setPythagoreA(Number(event.target.value))} />
-                    </label>
-                    <label>
-                      Côté B
-                      <input aria-label="Côté B" type="range" min="1" max="8" value={pythagoreB} onChange={(event) => setPythagoreB(Number(event.target.value))} />
-                    </label>
-                    <p className="formula-chip">c = √({pythagoreA}² + {pythagoreB}²) = {pythagoreC}</p>
-                  </div>
-                </section>
-
-                <section className="interactive-card">
-                  <p className="eyebrow muted">Mini-jeu de matching</p>
-                  <h3>Associe les idées</h3>
-                  <div className="match-grid">
-                    {generatedPath.matches.map(([term, definition]) => (
-                      <div className="match-row" key={term}>
-                        <span>{term}</span>
-                        <span>{definition}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <button type="button" className="button secondary" onClick={handleValidateMatching}>
-                    Valider les associations
-                  </button>
-                  {matchFeedback && <p className="match-feedback">{matchFeedback}</p>}
-                </section>
-              </div>
+            {!pathStarted && (
+              <button type="button" className="button primary" onClick={handleStartRevisionPath}>
+                Lancer le parcours
+              </button>
             )}
-
-            <div className="attachment-panel">
+            <div className="attachment-panel revision-attachments">
               <p className="attachment-title">Fichiers joints</p>
               <ul>
                 {openedSubject.attachments.map((attachment) => (
@@ -669,7 +613,63 @@ export default function App() {
               </ul>
             </div>
           </section>
-        </div>
+
+          {pathStarted && (
+            <div className="study-path full-study-path" aria-label="Parcours de révision généré">
+              <section className="lesson-card">
+                <p className="eyebrow muted">Cours</p>
+                <h2>Cours visuel</h2>
+                <p>
+                  Ce parcours part des documents déposés. Il isole les idées utiles,
+                  les reformule simplement et transforme le cours en activité manipulable.
+                </p>
+                <ul className="key-list">
+                  {generatedPath.essentials.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </section>
+
+              <section className="interactive-card visual-workbench">
+                <p className="eyebrow muted">Atelier interactif</p>
+                <h2>Manipuler le sujet</h2>
+                <p>{generatedPath.activity.prompt}</p>
+                <div className="concept-board" aria-label="atelier interactif">
+                  <div className="concept-node primary-node">{openedSubject.title}</div>
+                  <div className="concept-link" />
+                  <div className="concept-node">{generatedPath.activity.firstBlock}</div>
+                  <div className="concept-node">{generatedPath.activity.secondBlock}</div>
+                </div>
+              </section>
+
+              <section className="interactive-card">
+                <p className="eyebrow muted">Mini-jeu de matching</p>
+                <h2>Associe les idées</h2>
+                <div className="match-grid">
+                  {generatedPath.matches.map(([term, definition]) => (
+                    <div className="match-row" key={term}>
+                      <span>{term}</span>
+                      <span>{definition}</span>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" className="button secondary" onClick={handleValidateMatching}>
+                  Valider l'activité
+                </button>
+                {matchFeedback && <p className="match-feedback">{matchFeedback}</p>}
+              </section>
+
+              <div className="attachment-panel">
+                <p className="attachment-title">Fichiers joints</p>
+                <ul>
+                  {openedSubject.attachments.map((attachment) => (
+                    <li key={attachmentKey(attachment)}>
+                      <a href={downloadHrefForAttachment(attachment)} download={attachment.name}>{attachment.name}</a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+        </section>
       )}
     </main>
   );

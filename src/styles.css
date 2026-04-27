@@ -584,3 +584,120 @@ input[type='text'] {
   .triangle-stage { min-height: 220px; }
   .square-c { right: 18px; }
 }
+
+.ready-pill {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #067647;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.revision-page {
+  margin-top: 28px;
+  padding: 22px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow-card);
+}
+
+.revision-topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.revision-hero {
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(0, 114, 245, 0.1), transparent 28rem),
+    #fafafa;
+  box-shadow: rgba(0, 0, 0, 0.08) 0 0 0 1px inset;
+}
+
+.revision-hero h1 {
+  margin-bottom: 0;
+  font-size: clamp(38px, 7vw, 76px);
+}
+
+.revision-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: #666;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.revision-attachments {
+  margin-top: 4px;
+}
+
+.full-study-path {
+  margin-top: 18px;
+}
+
+.visual-workbench {
+  overflow: hidden;
+}
+
+.concept-board {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: rgba(0, 0, 0, 0.08) 0 0 0 1px;
+}
+
+.concept-node {
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  border-radius: 16px;
+  text-align: center;
+  font-weight: 700;
+  background: #fafafa;
+  box-shadow: rgba(0, 0, 0, 0.08) 0 0 0 1px;
+}
+
+.primary-node {
+  color: #fff;
+  background: #171717;
+}
+
+.concept-link {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  top: 50%;
+  height: 2px;
+  background: linear-gradient(90deg, #0072f5, #7c3aed, #f97316);
+  z-index: 0;
+  opacity: 0.28;
+}
+
+.concept-node {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 760px) {
+  .revision-page { padding: 14px; }
+  .revision-topbar { flex-direction: column; }
+  .concept-board { grid-template-columns: 1fr; }
+  .concept-link { display: none; }
+}
