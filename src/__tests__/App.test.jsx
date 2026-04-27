@@ -88,4 +88,32 @@ describe('Revision platform - étape 2 data coherence', () => {
 
     expect(await screen.findByText(/1 document sélectionné/i)).toBeInTheDocument();
   });
+
+  it('opens a floating detail window when clicking a previous subject with downloadable attachments', () => {
+    window.localStorage.setItem(
+      SUBJECTS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 's2',
+          title: 'Sujet Réseaux avancé',
+          documents: ['annale-2025.pdf', 'slides-tcpip.pdf'],
+          createdAt: '2026-04-27T11:00:00.000Z',
+        },
+      ]),
+    );
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: /ouvrir les détails de sujet réseaux avancé/i }));
+
+    expect(screen.getByRole('dialog', { name: /détails du sujet/i })).toBeInTheDocument();
+    expect(screen.getByText(/fichiers joints/i)).toBeInTheDocument();
+    expect(screen.getByText(/date de création/i)).toBeInTheDocument();
+    expect(screen.getByText(/nombre de documents/i)).toBeInTheDocument();
+    expect(screen.getByText(/format principal/i)).toBeInTheDocument();
+
+    const fileLink = screen.getByRole('link', { name: /annale-2025.pdf/i });
+    expect(fileLink).toHaveAttribute('download', 'annale-2025.pdf');
+    expect(fileLink.getAttribute('href')).toContain('data:application/pdf');
+  });
 });

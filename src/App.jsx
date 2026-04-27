@@ -6,6 +6,35 @@ const SUPPORTED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt'
 
 const documentCountLabel = (count) => `${count} document${count > 1 ? 's' : ''}`;
 
+const extensionFromName = (name = '') => {
+  const chunks = name.toLowerCase().split('.');
+  return chunks.length > 1 ? chunks.at(-1) : '';
+};
+
+const mimeFromExtension = (ext) => {
+  if (ext === 'pdf') return 'application/pdf';
+  if (ext === 'doc') return 'application/msword';
+  if (ext === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (ext === 'ppt') return 'application/vnd.ms-powerpoint';
+  if (ext === 'pptx') return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  if (ext === 'txt') return 'text/plain';
+  if (ext === 'md') return 'text/markdown';
+  return 'application/octet-stream';
+};
+
+const downloadHrefForName = (filename) => {
+  const ext = extensionFromName(filename);
+  const mime = mimeFromExtension(ext);
+  const payload = encodeURIComponent(`Document: ${filename}`);
+  return `data:${mime};charset=utf-8,${payload}`;
+};
+
+const primaryFormatFromDocuments = (documents = []) => {
+  if (!documents.length) return 'Inconnu';
+  const ext = extensionFromName(documents[0]);
+  return ext ? ext.toUpperCase() : 'Inconnu';
+};
+
 const formatDate = (isoDate) => {
   const parsed = new Date(isoDate);
   if (Number.isNaN(parsed.getTime())) {
@@ -132,6 +161,7 @@ export default function App() {
   const [subjectTitle, setSubjectTitle] = useState('');
   const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [dragActive, setDragActive] = useState(false);
+  const [openedSubject, setOpenedSubject] = useState(null);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(subjects));
@@ -223,9 +253,15 @@ export default function App() {
           ) : (
             <div className="subject-list">
               {subjects.map((subject) => (
-                <article className="subject-card" key={subject.id}>
+                <button
+                  className="subject-card subject-card-button"
+                  key={subject.id}
+                  type="button"
+                  aria-label={`Ouvrir les détails de ${subject.title}`}
+                  onClick={() => setOpenedSubject(subject)}
+                >
                   <div className="subject-icon" aria-hidden="true"><FileText size={18} /></div>
-                  <div>
+                  <div className="subject-main">
                     <p className="subject-meta">
                       {formatDate(subject.createdAt)} · {documentCountLabel(subject.documents.length)}
                     </p>
@@ -233,7 +269,7 @@ export default function App() {
                     <p className="subject-documents">{subject.documents.join(' · ')}</p>
                   </div>
                   <ArrowUpRight className="subject-arrow" size={17} aria-hidden="true" />
-                </article>
+                </button>
               ))}
             </div>
           )}
@@ -317,6 +353,44 @@ export default function App() {
           </form>
         </section>
       </section>
+
+      {openedSubject && (
+        <div className="floating-overlay" role="presentation" onClick={() => setOpenedSubject(null)}>
+          <section
+            className="floating-window"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Détails du sujet"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="floating-header">
+              <h3>Détails du sujet</h3>
+              <button type="button" className="close-button" onClick={() => setOpenedSubject(null)}>
+                Fermer
+              </button>
+            </div>
+
+            <p className="floating-title">{openedSubject.title}</p>
+
+            <div className="floating-info-grid">
+              <p><strong>Date de création</strong><span>{formatDate(openedSubject.createdAt)}</span></p>
+              <p><strong>Nombre de documents</strong><span>{documentCountLabel(openedSubject.documents.length)}</span></p>
+              <p><strong>Format principal</strong><span>{primaryFormatFromDocuments(openedSubject.documents)}</span></p>
+            </div>
+
+            <div className="attachment-panel">
+              <p className="attachment-title">Fichiers joints</p>
+              <ul>
+                {openedSubject.documents.map((filename) => (
+                  <li key={filename}>
+                    <a href={downloadHrefForName(filename)} download={filename}>{filename}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
