@@ -274,12 +274,31 @@ const downloadHrefForAttachment = (attachment) => {
   return `data:${mime};charset=utf-8,${payload}`;
 };
 
+const buildStarterRevisionPath = (subject) => ({
+  title: subject.title,
+  status: 'Parcours visuel prêt',
+  essentials: [
+    'On part de zéro. Une idée par bloc.',
+    'Formule ou règle centrale en premier. Exceptions après.',
+    'Chaque notion doit être manipulée, pas seulement lue.',
+  ],
+  matches: [
+    ['Hypoténuse', 'Côté le plus long, face à l’angle droit'],
+    ['Carré', 'Aire construite sur un côté'],
+    ['Validation', 'Retour immédiat vert ou rouge'],
+  ],
+});
+
 export default function App() {
   const [subjects, setSubjects] = useState([]);
   const [subjectTitle, setSubjectTitle] = useState('');
   const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const [openedSubject, setOpenedSubject] = useState(null);
+  const [generatedPath, setGeneratedPath] = useState(null);
+  const [pythagoreA, setPythagoreA] = useState(3);
+  const [pythagoreB, setPythagoreB] = useState(4);
+  const [matchFeedback, setMatchFeedback] = useState('');
 
   useEffect(() => {
     let canceled = false;
@@ -308,6 +327,26 @@ export default function App() {
     () => `${documentCountLabel(selectedDocuments.length)} sélectionné${selectedDocuments.length > 1 ? 's' : ''}`,
     [selectedDocuments.length],
   );
+
+  const pythagoreC = Math.sqrt((pythagoreA ** 2) + (pythagoreB ** 2)).toFixed(2);
+  const pythagoreAreaC = ((pythagoreA ** 2) + (pythagoreB ** 2)).toFixed(0);
+
+  const openSubjectWorkspace = (subject) => {
+    setOpenedSubject(subject);
+    setGeneratedPath(null);
+    setMatchFeedback('');
+    setPythagoreA(3);
+    setPythagoreB(4);
+  };
+
+  const handleGenerateRevisionPath = () => {
+    if (!openedSubject) return;
+    setGeneratedPath(buildStarterRevisionPath(openedSubject));
+  };
+
+  const handleValidateMatching = () => {
+    setMatchFeedback('Correct : les liens sont cohérents.');
+  };
 
   const mergeSelectedDocuments = async (incomingFiles) => {
     const supportedFiles = Array.from(incomingFiles ?? []).filter(isSupportedDocument);
@@ -421,7 +460,7 @@ export default function App() {
                   key={subject.id}
                   type="button"
                   aria-label={`Ouvrir les détails de ${subject.title}`}
-                  onClick={() => setOpenedSubject(subject)}
+                  onClick={() => openSubjectWorkspace(subject)}
                 >
                   <div className="subject-icon" aria-hidden="true"><FileText size={18} /></div>
                   <div className="subject-main">
@@ -520,14 +559,17 @@ export default function App() {
       {openedSubject && (
         <div className="floating-overlay" role="presentation" onClick={() => setOpenedSubject(null)}>
           <section
-            className="floating-window"
+            className="floating-window study-window"
             role="dialog"
             aria-modal="true"
             aria-label="Détails du sujet"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="floating-header">
-              <h3>Détails du sujet</h3>
+              <div>
+                <p className="eyebrow muted">Texte clair + jeux visuels</p>
+                <h3>Atelier de révision</h3>
+              </div>
               <div className="floating-header-actions">
                 <button type="button" className="delete-button" onClick={handleDeleteOpenedSubject}>
                   Supprimer ce sujet
@@ -545,6 +587,76 @@ export default function App() {
               <p><strong>Nombre de documents</strong><span>{documentCountLabel(openedSubject.documents.length)}</span></p>
               <p><strong>Format principal</strong><span>{primaryFormatFromDocuments(openedSubject.documents)}</span></p>
             </div>
+
+            <div className="study-intro">
+              <div>
+                <p className="attachment-title">Génération IA prévue</p>
+                <p>Première brique : produire un parcours lisible, visuel, rejouable, avec interactions adaptées au sujet.</p>
+              </div>
+              <button type="button" className="button primary" onClick={handleGenerateRevisionPath}>
+                Générer le parcours interactif
+              </button>
+            </div>
+
+            {generatedPath && (
+              <div className="study-path" aria-label="Parcours de révision généré">
+                <p className="generation-status">{generatedPath.status}</p>
+
+                <section className="lesson-card">
+                  <p className="eyebrow muted">Cours</p>
+                  <h3>Comprendre sans blabla</h3>
+                  <p>
+                    On garde uniquement ce qui aide à résoudre. La règle principale vient d’abord,
+                    puis une image mentale, puis une manipulation.
+                  </p>
+                  <ul className="key-list">
+                    {generatedPath.essentials.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </section>
+
+                <section className="interactive-card">
+                  <div>
+                    <p className="eyebrow muted">Simulateur visuel</p>
+                    <h3>Pythagore manipulable</h3>
+                    <p>Change les côtés. Les carrés suivent. L’hypoténuse se recalcule.</p>
+                  </div>
+                  <div className="pythagore-lab">
+                    <div className="triangle-stage" aria-label="animation pythagore">
+                      <div className="square square-a" style={{ width: `${pythagoreA * 12}px`, height: `${pythagoreA * 12}px` }}>a²</div>
+                      <div className="triangle-shape" />
+                      <div className="square square-b" style={{ width: `${pythagoreB * 12}px`, height: `${pythagoreB * 12}px` }}>b²</div>
+                      <div className="square square-c">c² = {pythagoreAreaC}</div>
+                    </div>
+                    <label>
+                      Côté A
+                      <input aria-label="Côté A" type="range" min="1" max="8" value={pythagoreA} onChange={(event) => setPythagoreA(Number(event.target.value))} />
+                    </label>
+                    <label>
+                      Côté B
+                      <input aria-label="Côté B" type="range" min="1" max="8" value={pythagoreB} onChange={(event) => setPythagoreB(Number(event.target.value))} />
+                    </label>
+                    <p className="formula-chip">c = √({pythagoreA}² + {pythagoreB}²) = {pythagoreC}</p>
+                  </div>
+                </section>
+
+                <section className="interactive-card">
+                  <p className="eyebrow muted">Mini-jeu de matching</p>
+                  <h3>Associe les idées</h3>
+                  <div className="match-grid">
+                    {generatedPath.matches.map(([term, definition]) => (
+                      <div className="match-row" key={term}>
+                        <span>{term}</span>
+                        <span>{definition}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" className="button secondary" onClick={handleValidateMatching}>
+                    Valider les associations
+                  </button>
+                  {matchFeedback && <p className="match-feedback">{matchFeedback}</p>}
+                </section>
+              </div>
+            )}
 
             <div className="attachment-panel">
               <p className="attachment-title">Fichiers joints</p>

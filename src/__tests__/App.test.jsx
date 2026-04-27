@@ -245,6 +245,38 @@ describe('Revision platform - étape 2 data coherence', () => {
     expect(screen.getByText(/aucun sujet pour le moment/i)).toBeInTheDocument();
   });
 
+  it('opens a study workspace and generates a first visual interactive revision path', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ([
+        {
+          id: 'pythagore-1',
+          title: 'Théorème de Pythagore',
+          created_at: '2026-04-27T12:00:00.000Z',
+          documents: ['pythagore.pdf'],
+          attachments: [{ name: 'pythagore.pdf', type: 'application/pdf', size: 500, dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK' }],
+        },
+      ]),
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /ouvrir les détails de théorème de pythagore/i }));
+
+    expect(screen.getByRole('heading', { name: /atelier de révision/i })).toBeInTheDocument();
+    expect(screen.getByText(/texte clair \+ jeux visuels/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /générer le parcours interactif/i }));
+
+    expect(await screen.findByText(/parcours visuel prêt/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /comprendre sans blabla/i })).toBeInTheDocument();
+    expect(screen.getByText(/simulateur visuel/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/côté a/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/côté b/i)).toBeInTheDocument();
+    expect(screen.getByText(/mini-jeu de matching/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /valider les associations/i })).toBeInTheDocument();
+  });
+
   it('stores real file payload and exposes a non-corrupted download link for newly created subjects', async () => {
     global.fetch = vi
       .fn()
