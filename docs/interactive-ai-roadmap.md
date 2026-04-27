@@ -3,9 +3,10 @@
 Goal: turn uploaded course PDFs into a persistent, visual, interactive revision workspace.
 
 ## Phase 1 — Done
-- Clicking a subject opens an Atelier de révision.
-- A first generated visual path appears on demand.
-- The path includes concise lesson content, a Pythagore slider simulator, and a matching mini-game.
+- Clicking a subject opens a large full-page `Parcours de révision` view.
+- Creating a subject auto-prepares a `Parcours prêt` state.
+- The first generated path is subject/document-aware and no longer hardcodes Pythagore for unrelated subjects.
+- The path includes concise lesson content, a generic visual manipulation board, and a matching mini-game.
 - Tests cover the user flow.
 
 ## Phase 2 — Next
