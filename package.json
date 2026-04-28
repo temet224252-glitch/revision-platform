@@ -12,15 +12,16 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "lucide-react": "latest",
+    "pdfjs-dist": "^5.7.284",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest"
+    "vite": "latest"
   },
   "devDependencies": {
-    "vitest": "latest",
-    "jsdom": "latest",
+    "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
-    "@testing-library/jest-dom": "latest"
+    "jsdom": "latest",
+    "vitest": "latest"
   }
 }

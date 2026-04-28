@@ -1,6 +1,8 @@
 import { ArrowUpRight, FileText, FolderOpen, UploadCloud } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
+const PDF_WORKER_URL = new URL('pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
+
 const SUPPORTED_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt', 'md', 'odt']);
 
 const SUPABASE_URL = 'https://ssqqsjziknqhwdufgduv.supabase.co';
@@ -69,6 +71,64 @@ const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+const readFileAsArrayBuffer = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result instanceof ArrayBuffer ? reader.result : new ArrayBuffer(0));
+  reader.onerror = () => reject(reader.error || new Error('Unable to read file'));
+  reader.readAsArrayBuffer(file);
+});
+
+const cleanExtractedText = (text = '') => text
+  .replace(/\u0000/g, ' ')
+  .replace(/[\t\r]+/g, ' ')
+  .replace(/\s*\n\s*/g, '\n')
+  .replace(/[ ]{2,}/g, ' ')
+  .trim();
+
+const rawTextFromBuffer = (buffer) => {
+  try {
+    return cleanExtractedText(new TextDecoder('utf-8', { fatal: false }).decode(buffer));
+  } catch {
+    return '';
+  }
+};
+
+const extractPdfText = async (file, buffer) => {
+  try {
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
+    const pdf = await pdfjs.getDocument({ data: buffer.slice(0) }).promise;
+    const pages = await Promise.all(
+      Array.from({ length: pdf.numPages }, async (_, index) => {
+        const page = await pdf.getPage(index + 1);
+        const content = await page.getTextContent();
+        return content.items.map((item) => item.str || '').join(' ');
+      }),
+    );
+    const extracted = cleanExtractedText(pages.join('\n'));
+    if (extracted) return extracted;
+  } catch {
+    // Fallback below handles malformed PDFs in tests and simple text-like payloads.
+  }
+
+  return rawTextFromBuffer(buffer);
+};
+
+const extractDocumentText = async (file) => {
+  const ext = extensionFromName(file.name);
+  const buffer = await readFileAsArrayBuffer(file);
+
+  if (ext === 'pdf' || file.type === 'application/pdf') {
+    return extractPdfText(file, buffer);
+  }
+
+  if (['txt', 'md'].includes(ext) || file.type?.startsWith('text/')) {
+    return rawTextFromBuffer(buffer);
+  }
+
+  return '';
+};
+
 const attachmentKey = (attachment) => `${attachment.name}::${attachment.size ?? 0}`;
 
 const normalizeAttachment = (attachmentLike) => {
@@ -81,6 +141,8 @@ const normalizeAttachment = (attachmentLike) => {
       type: mimeFromExtension(ext),
       size: null,
       dataUrl: null,
+      contentText: '',
+      extractionStatus: 'missing',
     };
   }
 
@@ -93,6 +155,10 @@ const normalizeAttachment = (attachmentLike) => {
         : mimeFromExtension(ext),
       size: typeof attachmentLike.size === 'number' ? attachmentLike.size : null,
       dataUrl: typeof attachmentLike.dataUrl === 'string' ? attachmentLike.dataUrl : null,
+      contentText: typeof attachmentLike.contentText === 'string' ? cleanExtractedText(attachmentLike.contentText) : '',
+      extractionStatus: typeof attachmentLike.extractionStatus === 'string'
+        ? attachmentLike.extractionStatus
+        : (typeof attachmentLike.contentText === 'string' && attachmentLike.contentText.trim() ? 'ready' : 'missing'),
     };
   }
 
@@ -279,29 +345,63 @@ const humanizeDocumentName = (name = '') => name
   .replace(/[-_]+/g, ' ')
   .trim();
 
+const extractedTextFromSubject = (subject) => cleanExtractedText(
+  (subject.attachments || [])
+    .map((attachment) => attachment.contentText || '')
+    .filter(Boolean)
+    .join('\n'),
+);
+
+const splitCourseSentences = (text = '') => cleanExtractedText(text)
+  .split(/(?<=[.!?])\s+|\n+/u)
+  .map((sentence) => cleanExtractedText(sentence))
+  .filter((sentence) => sentence.length >= 24 && /[a-zà-ÿ]/i.test(sentence))
+  .slice(0, 6);
+
+const conceptTermsFromText = (text = '') => {
+  const acronyms = [...new Set((text.match(/\b[A-Z0-9]{2,}(?:\.[0-9]{2})?\b/g) || [])
+    .filter((term) => !['PDF'].includes(term)))];
+  const capitalized = [...new Set((text.match(/\b[A-ZÉÈÀÂÎÔÙÛÇ][\wÀ-ÿ-]{4,}\b/g) || [])
+    .filter((term) => !['Cours'].includes(term)))];
+  return [...acronyms, ...capitalized].slice(0, 6);
+};
+
 const buildStarterRevisionPath = (subject) => {
   const documentTopics = subject.documents.map(humanizeDocumentName).filter(Boolean);
-  const topicSource = [subject.title, ...documentTopics].join(' · ');
+  const extractedText = extractedTextFromSubject(subject);
+  const courseSentences = splitCourseSentences(extractedText);
+  const concepts = conceptTermsFromText(extractedText);
+  const hasExtractedCourse = courseSentences.length > 0;
+  const topicSource = hasExtractedCourse
+    ? `Contenu lu dans ${documentCountLabel(subject.documents.length)} : ${documentTopics.join(' · ')}`
+    : [subject.title, ...documentTopics].join(' · ');
 
   return {
     title: subject.title,
-    status: 'Parcours prêt',
+    status: hasExtractedCourse ? 'Parcours prêt · contenu du PDF lu' : 'Parcours prêt · texte du PDF non extrait',
     source: topicSource,
-    essentials: [
+    summary: hasExtractedCourse
+      ? courseSentences.slice(0, 3).join(' ')
+      : `Le contenu texte n'a pas encore été extrait. Le parcours utilise seulement les métadonnées de ${subject.title}.`,
+    essentials: hasExtractedCourse ? courseSentences.slice(0, 4) : [
       `Comprendre ${subject.title} depuis les documents déposés.`,
       'Retenir les règles utiles avant les détails.',
       'Manipuler une situation visuelle, puis valider avec retour immédiat.',
     ],
     activity: {
-      prompt: `Construis une représentation visuelle de ${subject.title}, puis vérifie chaque lien important.`,
-      firstBlock: documentTopics[0] || subject.title,
-      secondBlock: documentTopics[1] || 'idée clé du cours',
+      prompt: hasExtractedCourse
+        ? `Construis une carte du cours à partir de ces notions : ${(concepts.length ? concepts : [subject.title]).slice(0, 4).join(', ')}.`
+        : `Construis une représentation visuelle de ${subject.title}, puis vérifie chaque lien important.`,
+      firstBlock: concepts[0] || courseSentences[0] || documentTopics[0] || subject.title,
+      secondBlock: concepts[1] || courseSentences[1] || documentTopics[1] || 'idée clé du cours',
     },
-    matches: [
-      [subject.title, 'Sujet principal à maîtriser'],
-      [documentTopics[0] || 'Document source', 'Base du cours généré'],
-      ['Validation', 'Retour vert ou rouge selon la réponse'],
-    ],
+    matches: hasExtractedCourse
+      ? courseSentences.slice(0, 3).map((sentence, index) => [concepts[index] || `Idée ${index + 1}`, sentence])
+      : [
+        [subject.title, 'Sujet principal à maîtriser'],
+        [documentTopics[0] || 'Document source', 'Document déposé, en attente de lecture texte'],
+        ['Validation', 'Retour vert ou rouge selon la réponse'],
+      ],
   };
 };
 
@@ -366,12 +466,21 @@ export default function App() {
     if (!supportedFiles.length) return;
 
     const newAttachments = await Promise.all(
-      supportedFiles.map(async (file) => ({
-        name: file.name,
-        type: file.type || mimeFromExtension(extensionFromName(file.name)),
-        size: file.size,
-        dataUrl: await readFileAsDataUrl(file),
-      })),
+      supportedFiles.map(async (file) => {
+        const [dataUrl, contentText] = await Promise.all([
+          readFileAsDataUrl(file),
+          extractDocumentText(file),
+        ]);
+
+        return {
+          name: file.name,
+          type: file.type || mimeFromExtension(extensionFromName(file.name)),
+          size: file.size,
+          dataUrl,
+          contentText,
+          extractionStatus: contentText ? 'ready' : 'empty',
+        };
+      }),
     );
 
     setSelectedDocuments((current) => dedupeAttachments([...current, ...newAttachments]));
@@ -620,9 +729,13 @@ export default function App() {
                 <p className="eyebrow muted">Cours</p>
                 <h2>Cours visuel</h2>
                 <p>
-                  Ce parcours part des documents déposés. Il isole les idées utiles,
+                  Ce parcours part du texte lu dans les documents déposés. Il isole les idées utiles,
                   les reformule simplement et transforme le cours en activité manipulable.
                 </p>
+                <div className="course-summary">
+                  <p className="eyebrow muted">Résumé extrait</p>
+                  <p>{generatedPath.summary}</p>
+                </div>
                 <ul className="key-list">
                   {generatedPath.essentials.map((item) => <li key={item}>{item}</li>)}
                 </ul>

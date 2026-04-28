@@ -303,6 +303,41 @@ describe('Revision platform - étape 2 data coherence', () => {
     expect(screen.getByRole('main', { name: /parcours de révision/i })).toBeInTheDocument();
   });
 
+  it('builds the revision course from extracted PDF text instead of only the file title', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] });
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText(/nom du sujet/i), {
+      target: { value: 'Réseaux' },
+    });
+
+    const pdfInput = screen.getByLabelText(/sélectionner un ou plusieurs pdf/i, { selector: 'input' });
+    const courseText = [
+      'Cours R2.05 Services Réseaux.',
+      'Une adresse IPv4 identifie une interface réseau sur 32 bits.',
+      'Le DNS traduit un nom de domaine en adresse IP utilisable.',
+      'Le protocole DHCP attribue automatiquement une configuration réseau.',
+    ].join('\n');
+    fireEvent.change(pdfInput, {
+      target: { files: [new File([courseText], 'R2.05-ServicesReseaux-2025_2026-Cours_1.pdf', { type: 'application/pdf' })] },
+    });
+
+    await screen.findByText(/1 document sélectionné/i);
+    fireEvent.click(screen.getByRole('button', { name: /ajouter le sujet/i }));
+
+    fireEvent.click(await screen.findByRole('button', { name: /ouvrir les détails de réseaux/i }));
+    fireEvent.click(screen.getByRole('button', { name: /lancer le parcours/i }));
+
+    expect((await screen.findAllByText(/une adresse ipv4 identifie une interface réseau sur 32 bits/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/le dns traduit un nom de domaine en adresse ip utilisable/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/le protocole dhcp attribue automatiquement une configuration réseau/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/base du cours généré/i)).not.toBeInTheDocument();
+  });
+
   it('stores real file payload and exposes a non-corrupted download link for newly created subjects', async () => {
     global.fetch = vi
       .fn()

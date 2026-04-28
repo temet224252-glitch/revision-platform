@@ -701,3 +701,19 @@ input[type='text'] {
   .concept-board { grid-template-columns: 1fr; }
   .concept-link { display: none; }
 }
+
+.course-summary {
+  margin: 14px 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: rgba(0, 0, 0, 0.08) 0 0 0 1px inset;
+}
+
+.course-summary .eyebrow {
+  margin-bottom: 6px;
+}
+
+.course-summary p:last-child {
+  color: #262626;
+}
