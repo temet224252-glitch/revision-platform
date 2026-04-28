@@ -363,6 +363,55 @@ describe('Revision platform - étape 2 data coherence', () => {
     expect(screen.getAllByText(/un routeur utilise sa table de routage pour sélectionner le prochain saut/i).length).toBeGreaterThan(0);
   });
 
+  it('shows page-level PDF sources with extracted text and rendered page images in the course', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ([
+        {
+          id: 'pdf-pages',
+          title: 'Services réseaux',
+          created_at: '2026-04-27T12:00:00.000Z',
+          documents: ['cours-services-reseaux.pdf'],
+          attachments: [{
+            name: 'cours-services-reseaux.pdf',
+            type: 'application/pdf',
+            size: 500,
+            dataUrl: 'data:application/pdf;base64,JVBERi0xLjQK',
+            contentText: 'Le serveur DHCP distribue une adresse IP, un masque, une passerelle et un DNS.',
+            pdfPages: [
+              {
+                pageNumber: 1,
+                text: 'Le serveur DHCP distribue une adresse IP, un masque, une passerelle et un DNS.',
+                imageDataUrl: 'data:image/png;base64,page-one',
+                width: 900,
+                height: 1200,
+              },
+              {
+                pageNumber: 2,
+                text: 'Le DNS résout les noms de domaine pour joindre les services réseau.',
+                imageDataUrl: 'data:image/png;base64,page-two',
+                width: 900,
+                height: 1200,
+              },
+            ],
+          }],
+        },
+      ]),
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /ouvrir les détails de services réseaux/i }));
+    fireEvent.click(screen.getByRole('button', { name: /lancer le parcours/i }));
+
+    expect(await screen.findByRole('heading', { name: /sources pdf lues/i })).toBeInTheDocument();
+    expect(screen.getByText(/2 pages analysées/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/le serveur dhcp distribue une adresse ip, un masque, une passerelle et un dns/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/le dns résout les noms de domaine pour joindre les services réseau/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('img', { name: /aperçu page 1 de cours-services-reseaux.pdf/i })).toHaveAttribute('src', 'data:image/png;base64,page-one');
+    expect(screen.getByRole('img', { name: /aperçu page 2 de cours-services-reseaux.pdf/i })).toHaveAttribute('src', 'data:image/png;base64,page-two');
+  });
+
   it('stores real file payload and exposes a non-corrupted download link for newly created subjects', async () => {
     global.fetch = vi
       .fn()

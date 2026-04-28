@@ -109,69 +109,125 @@ const arrayBufferFromDataUrl = (dataUrl = '') => {
   return new TextEncoder().encode(decodeURIComponent(payload)).buffer;
 };
 
-const extractPdfText = async (file, buffer) => {
+const renderPdfPageImage = async (page) => {
+  if (typeof document === 'undefined') return '';
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext?.('2d');
+  if (!context) return '';
+
+  const baseViewport = page.getViewport({ scale: 1 });
+  const scale = Math.min(1.35, 900 / Math.max(baseViewport.width, 1));
+  const viewport = page.getViewport({ scale });
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+
+  await page.render({ canvasContext: context, viewport }).promise;
+  if (typeof canvas.toDataURL !== 'function') return '';
+  try {
+    return canvas.toDataURL('image/jpeg', 0.72);
+  } catch {
+    return canvas.toDataURL('image/png');
+  }
+};
+
+const extractPdfContent = async (file, buffer) => {
   try {
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
     const pdf = await pdfjs.getDocument({ data: buffer.slice(0) }).promise;
-    const pages = await Promise.all(
-      Array.from({ length: pdf.numPages }, async (_, index) => {
-        const page = await pdf.getPage(index + 1);
-        const content = await page.getTextContent();
-        return content.items.map((item) => item.str || '').join(' ');
-      }),
-    );
-    const extracted = cleanExtractedText(pages.join('\n'));
-    if (extracted) return extracted;
+    const pages = [];
+
+    for (let index = 0; index < pdf.numPages; index += 1) {
+      const page = await pdf.getPage(index + 1);
+      const content = await page.getTextContent();
+      const text = cleanExtractedText(content.items.map((item) => item.str || '').join(' '));
+      const viewport = page.getViewport({ scale: 1 });
+      const imageDataUrl = await renderPdfPageImage(page);
+      pages.push({
+        pageNumber: index + 1,
+        text,
+        imageDataUrl,
+        width: Math.round(viewport.width),
+        height: Math.round(viewport.height),
+      });
+    }
+
+    const extracted = cleanExtractedText(pages.map((page) => page.text).join('\n'));
+    if (extracted || pages.some((page) => page.imageDataUrl)) {
+      return { contentText: extracted, pdfPages: pages };
+    }
   } catch {
     // Fallback below handles malformed PDFs in tests and simple text-like payloads.
   }
 
-  return rawTextFromBuffer(buffer);
+  const fallbackText = rawTextFromBuffer(buffer);
+  return {
+    contentText: fallbackText,
+    pdfPages: fallbackText ? [{ pageNumber: 1, text: fallbackText, imageDataUrl: '', width: 0, height: 0 }] : [],
+  };
 };
 
-const extractDocumentText = async (file) => {
+const extractPdfText = async (file, buffer) => {
+  const content = await extractPdfContent(file, buffer);
+  return content.contentText;
+};
+
+const extractDocumentContent = async (file) => {
   const ext = extensionFromName(file.name);
   const buffer = await readFileAsArrayBuffer(file);
 
   if (ext === 'pdf' || file.type === 'application/pdf') {
-    return extractPdfText(file, buffer);
+    return extractPdfContent(file, buffer);
   }
 
   if (['txt', 'md'].includes(ext) || file.type?.startsWith('text/')) {
-    return rawTextFromBuffer(buffer);
+    const contentText = rawTextFromBuffer(buffer);
+    return { contentText, pdfPages: [] };
   }
 
-  return '';
+  return { contentText: '', pdfPages: [] };
 };
 
-const extractAttachmentText = async (attachment) => {
-  if (attachment.contentText) return attachment.contentText;
-  if (!attachment.dataUrl) return '';
+const extractDocumentText = async (file) => {
+  const content = await extractDocumentContent(file);
+  return content.contentText;
+};
+
+const extractAttachmentContent = async (attachment) => {
+  if (attachment.contentText || attachment.pdfPages?.length) {
+    return { contentText: attachment.contentText || '', pdfPages: attachment.pdfPages || [] };
+  }
+  if (!attachment.dataUrl) return { contentText: '', pdfPages: [] };
 
   const ext = extensionFromName(attachment.name);
   const buffer = arrayBufferFromDataUrl(attachment.dataUrl);
-  if (!buffer.byteLength) return '';
+  if (!buffer.byteLength) return { contentText: '', pdfPages: [] };
 
   if (ext === 'pdf' || attachment.type === 'application/pdf') {
-    return extractPdfText({ name: attachment.name, type: attachment.type }, buffer);
+    return extractPdfContent({ name: attachment.name, type: attachment.type }, buffer);
   }
 
   if (['txt', 'md'].includes(ext) || attachment.type?.startsWith('text/')) {
-    return rawTextFromBuffer(buffer);
+    return { contentText: rawTextFromBuffer(buffer), pdfPages: [] };
   }
 
-  return '';
+  return { contentText: '', pdfPages: [] };
+};
+
+const extractAttachmentText = async (attachment) => {
+  const content = await extractAttachmentContent(attachment);
+  return content.contentText;
 };
 
 const enrichSubjectWithExtractedText = async (subject) => {
   const attachments = await Promise.all((subject.attachments || []).map(async (attachment) => {
-    if (attachment.contentText) return attachment;
-    const contentText = await extractAttachmentText(attachment);
+    if (attachment.contentText && attachment.pdfPages?.length) return attachment;
+    const { contentText, pdfPages } = await extractAttachmentContent(attachment);
     return {
       ...attachment,
       contentText,
-      extractionStatus: contentText ? 'ready' : (attachment.extractionStatus || 'empty'),
+      pdfPages,
+      extractionStatus: contentText || pdfPages.length ? 'ready' : (attachment.extractionStatus || 'empty'),
     };
   }));
 
@@ -194,6 +250,7 @@ const normalizeAttachment = (attachmentLike) => {
       size: null,
       dataUrl: null,
       contentText: '',
+      pdfPages: [],
       extractionStatus: 'missing',
     };
   }
@@ -208,6 +265,17 @@ const normalizeAttachment = (attachmentLike) => {
       size: typeof attachmentLike.size === 'number' ? attachmentLike.size : null,
       dataUrl: typeof attachmentLike.dataUrl === 'string' ? attachmentLike.dataUrl : null,
       contentText: typeof attachmentLike.contentText === 'string' ? cleanExtractedText(attachmentLike.contentText) : '',
+      pdfPages: Array.isArray(attachmentLike.pdfPages)
+        ? attachmentLike.pdfPages
+          .map((page, index) => ({
+            pageNumber: Number.isFinite(page?.pageNumber) ? page.pageNumber : index + 1,
+            text: typeof page?.text === 'string' ? cleanExtractedText(page.text) : '',
+            imageDataUrl: typeof page?.imageDataUrl === 'string' ? page.imageDataUrl : '',
+            width: typeof page?.width === 'number' ? page.width : 0,
+            height: typeof page?.height === 'number' ? page.height : 0,
+          }))
+          .filter((page) => page.text || page.imageDataUrl)
+        : [],
       extractionStatus: typeof attachmentLike.extractionStatus === 'string'
         ? attachmentLike.extractionStatus
         : (typeof attachmentLike.contentText === 'string' && attachmentLike.contentText.trim() ? 'ready' : 'missing'),
@@ -398,11 +466,26 @@ const humanizeDocumentName = (name = '') => name
   .trim();
 
 const extractedTextFromSubject = (subject) => cleanExtractedText(
-  (subject.attachments || [])
-    .map((attachment) => attachment.contentText || '')
-    .filter(Boolean)
+  [...new Set((subject.attachments || [])
+    .flatMap((attachment) => [
+      attachment.contentText || '',
+      ...(attachment.pdfPages || []).map((page) => page.text || ''),
+    ])
+    .map((part) => cleanExtractedText(part))
+    .filter(Boolean))]
     .join('\n'),
 );
+
+const pdfSourcesFromSubject = (subject) => (subject.attachments || [])
+  .flatMap((attachment) => (attachment.pdfPages || []).map((page) => ({
+    documentName: attachment.name,
+    pageNumber: page.pageNumber,
+    text: page.text || '',
+    imageDataUrl: page.imageDataUrl || '',
+    width: page.width || 0,
+    height: page.height || 0,
+  })))
+  .filter((page) => page.text || page.imageDataUrl);
 
 const splitCourseSentences = (text = '') => cleanExtractedText(text)
   .split(/(?<=[.!?])\s+|\n+/u)
@@ -421,6 +504,7 @@ const conceptTermsFromText = (text = '') => {
 const buildStarterRevisionPath = (subject) => {
   const documentTopics = subject.documents.map(humanizeDocumentName).filter(Boolean);
   const extractedText = extractedTextFromSubject(subject);
+  const pdfSources = pdfSourcesFromSubject(subject);
   const courseSentences = splitCourseSentences(extractedText);
   const concepts = conceptTermsFromText(extractedText);
   const hasExtractedCourse = courseSentences.length > 0;
@@ -432,6 +516,12 @@ const buildStarterRevisionPath = (subject) => {
     title: subject.title,
     status: hasExtractedCourse ? 'Parcours prêt · contenu du PDF lu' : 'Parcours prêt · texte du PDF non extrait',
     source: topicSource,
+    pdfSources,
+    sourceStats: {
+      pageCount: pdfSources.length,
+      imageCount: pdfSources.filter((page) => page.imageDataUrl).length,
+      textCharacterCount: extractedText.length,
+    },
     summary: hasExtractedCourse
       ? courseSentences.slice(0, 3).join(' ')
       : `Le contenu texte n'a pas encore été extrait. Le parcours utilise seulement les métadonnées de ${subject.title}.`,
@@ -507,7 +597,7 @@ export default function App() {
     setPathStarted(false);
     setMatchFeedback('');
 
-    if ((subject.attachments || []).some((attachment) => attachment.dataUrl && !attachment.contentText)) {
+    if ((subject.attachments || []).some((attachment) => attachment.dataUrl && (!attachment.contentText || !attachment.pdfPages?.length))) {
       const enrichedSubject = await enrichSubjectWithExtractedText(subject);
       if (openWorkspaceToken.current !== token) return;
       const enrichedPath = buildStarterRevisionPath(enrichedSubject);
@@ -532,9 +622,9 @@ export default function App() {
 
     const newAttachments = await Promise.all(
       supportedFiles.map(async (file) => {
-        const [dataUrl, contentText] = await Promise.all([
+        const [dataUrl, extractedContent] = await Promise.all([
           readFileAsDataUrl(file),
-          extractDocumentText(file),
+          extractDocumentContent(file),
         ]);
 
         return {
@@ -542,8 +632,9 @@ export default function App() {
           type: file.type || mimeFromExtension(extensionFromName(file.name)),
           size: file.size,
           dataUrl,
-          contentText,
-          extractionStatus: contentText ? 'ready' : 'empty',
+          contentText: extractedContent.contentText,
+          pdfPages: extractedContent.pdfPages,
+          extractionStatus: extractedContent.contentText || extractedContent.pdfPages.length ? 'ready' : 'empty',
         };
       }),
     );
@@ -810,9 +901,36 @@ export default function App() {
                   <p>{generatedPath.summary}</p>
                 </div>
                 <ul className="key-list">
-                  {generatedPath.essentials.map((item) => <li key={item}>{item}</li>)}
+                  {generatedPath.essentials.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
                 </ul>
               </section>
+
+              {generatedPath.pdfSources?.length > 0 && (
+                <section className="interactive-card pdf-sources-card">
+                  <p className="eyebrow muted">Preuves d'extraction</p>
+                  <h2>Sources PDF lues</h2>
+                  <p>
+                    {generatedPath.sourceStats.pageCount} pages analysées · {generatedPath.sourceStats.imageCount} aperçus visuels · {generatedPath.sourceStats.textCharacterCount} caractères extraits.
+                  </p>
+                  <div className="pdf-source-grid">
+                    {generatedPath.pdfSources.map((page) => (
+                      <article className="pdf-source-page" key={`${page.documentName}-${page.pageNumber}`}>
+                        <div className="pdf-source-header">
+                          <strong>{page.documentName}</strong>
+                          <span>Page {page.pageNumber}</span>
+                        </div>
+                        {page.imageDataUrl && (
+                          <img
+                            src={page.imageDataUrl}
+                            alt={`Aperçu page ${page.pageNumber} de ${page.documentName}`}
+                          />
+                        )}
+                        {page.text && <p>{page.text}</p>}
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <section className="interactive-card visual-workbench">
                 <p className="eyebrow muted">Atelier interactif</p>
@@ -830,8 +948,8 @@ export default function App() {
                 <p className="eyebrow muted">Mini-jeu de matching</p>
                 <h2>Associe les idées</h2>
                 <div className="match-grid">
-                  {generatedPath.matches.map(([term, definition]) => (
-                    <div className="match-row" key={term}>
+                  {generatedPath.matches.map(([term, definition], index) => (
+                    <div className="match-row" key={`${index}-${term}`}>
                       <span>{term}</span>
                       <span>{definition}</span>
                     </div>

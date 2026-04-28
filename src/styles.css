@@ -717,3 +717,52 @@ input[type='text'] {
 .course-summary p:last-child {
   color: #262626;
 }
+
+.pdf-sources-card {
+  overflow: hidden;
+}
+
+.pdf-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.pdf-source-page {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: rgba(0, 0, 0, 0.08) 0 0 0 1px inset;
+}
+
+.pdf-source-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: #555;
+}
+
+.pdf-source-header strong {
+  color: #1f1f1f;
+  word-break: break-word;
+}
+
+.pdf-source-page img {
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #f3f3f3;
+  box-shadow: rgba(0, 0, 0, 0.08) 0 0 0 1px;
+}
+
+.pdf-source-page p {
+  max-height: 170px;
+  overflow: auto;
+  padding-right: 4px;
+  font-size: 13px;
+}
