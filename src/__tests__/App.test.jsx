@@ -338,6 +338,31 @@ describe('Revision platform - étape 2 data coherence', () => {
     expect(screen.queryByText(/base du cours généré/i)).not.toBeInTheDocument();
   });
 
+  it('extracts course text from stored attachment payloads when an older subject has no contentText yet', async () => {
+    const storedText = 'Le routage IP choisit un chemin entre deux réseaux. Un routeur utilise sa table de routage pour sélectionner le prochain saut.';
+    const encoded = btoa(unescape(encodeURIComponent(storedText)));
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ([
+        {
+          id: 'legacy-network',
+          title: 'Ancien sujet réseau',
+          created_at: '2026-04-27T12:00:00.000Z',
+          documents: ['ancien-routage.pdf'],
+          attachments: [{ name: 'ancien-routage.pdf', type: 'application/pdf', size: 500, dataUrl: `data:application/pdf;base64,${encoded}` }],
+        },
+      ]),
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /ouvrir les détails de ancien sujet réseau/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /lancer le parcours/i }));
+
+    expect((await screen.findAllByText(/le routage ip choisit un chemin entre deux réseaux/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/un routeur utilise sa table de routage pour sélectionner le prochain saut/i).length).toBeGreaterThan(0);
+  });
+
   it('stores real file payload and exposes a non-corrupted download link for newly created subjects', async () => {
     global.fetch = vi
       .fn()

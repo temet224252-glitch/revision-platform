@@ -1,5 +1,5 @@
 import { ArrowUpRight, FileText, FolderOpen, UploadCloud } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const PDF_WORKER_URL = new URL('pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString();
 
@@ -93,6 +93,22 @@ const rawTextFromBuffer = (buffer) => {
   }
 };
 
+const arrayBufferFromDataUrl = (dataUrl = '') => {
+  const [, metadata = '', payload = ''] = dataUrl.match(/^data:([^,]*),(.*)$/s) || [];
+  if (!payload) return new ArrayBuffer(0);
+
+  if (metadata.includes(';base64')) {
+    const binary = atob(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes.buffer;
+  }
+
+  return new TextEncoder().encode(decodeURIComponent(payload)).buffer;
+};
+
 const extractPdfText = async (file, buffer) => {
   try {
     const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -127,6 +143,42 @@ const extractDocumentText = async (file) => {
   }
 
   return '';
+};
+
+const extractAttachmentText = async (attachment) => {
+  if (attachment.contentText) return attachment.contentText;
+  if (!attachment.dataUrl) return '';
+
+  const ext = extensionFromName(attachment.name);
+  const buffer = arrayBufferFromDataUrl(attachment.dataUrl);
+  if (!buffer.byteLength) return '';
+
+  if (ext === 'pdf' || attachment.type === 'application/pdf') {
+    return extractPdfText({ name: attachment.name, type: attachment.type }, buffer);
+  }
+
+  if (['txt', 'md'].includes(ext) || attachment.type?.startsWith('text/')) {
+    return rawTextFromBuffer(buffer);
+  }
+
+  return '';
+};
+
+const enrichSubjectWithExtractedText = async (subject) => {
+  const attachments = await Promise.all((subject.attachments || []).map(async (attachment) => {
+    if (attachment.contentText) return attachment;
+    const contentText = await extractAttachmentText(attachment);
+    return {
+      ...attachment,
+      contentText,
+      extractionStatus: contentText ? 'ready' : (attachment.extractionStatus || 'empty'),
+    };
+  }));
+
+  return {
+    ...subject,
+    attachments,
+  };
 };
 
 const attachmentKey = (attachment) => `${attachment.name}::${attachment.size ?? 0}`;
@@ -415,6 +467,7 @@ export default function App() {
   const [generatedPath, setGeneratedPath] = useState(null);
   const [pathStarted, setPathStarted] = useState(false);
   const [matchFeedback, setMatchFeedback] = useState('');
+  const openWorkspaceToken = useRef(0);
 
   useEffect(() => {
     let canceled = false;
@@ -444,13 +497,25 @@ export default function App() {
     [selectedDocuments.length],
   );
 
-  const openSubjectWorkspace = (subject) => {
-    const path = generatedPaths[subject.id] || buildStarterRevisionPath(subject);
-    setGeneratedPaths((current) => ({ ...current, [subject.id]: path }));
+  const openSubjectWorkspace = async (subject) => {
+    const token = openWorkspaceToken.current + 1;
+    openWorkspaceToken.current = token;
+    const initialPath = generatedPaths[subject.id] || buildStarterRevisionPath(subject);
+    setGeneratedPaths((current) => ({ ...current, [subject.id]: initialPath }));
     setOpenedSubject(subject);
-    setGeneratedPath(path);
+    setGeneratedPath(initialPath);
     setPathStarted(false);
     setMatchFeedback('');
+
+    if ((subject.attachments || []).some((attachment) => attachment.dataUrl && !attachment.contentText)) {
+      const enrichedSubject = await enrichSubjectWithExtractedText(subject);
+      if (openWorkspaceToken.current !== token) return;
+      const enrichedPath = buildStarterRevisionPath(enrichedSubject);
+      setSubjects((current) => current.map((item) => (item.id === enrichedSubject.id ? enrichedSubject : item)));
+      setOpenedSubject(enrichedSubject);
+      setGeneratedPath(enrichedPath);
+      setGeneratedPaths((current) => ({ ...current, [enrichedSubject.id]: enrichedPath }));
+    }
   };
 
   const handleStartRevisionPath = () => {
@@ -530,6 +595,7 @@ export default function App() {
     try {
       await deleteRemoteSubject(idToDelete);
       setSubjects((current) => current.filter((subject) => subject.id !== idToDelete));
+      openWorkspaceToken.current += 1;
       setOpenedSubject(null);
     } catch {
       // BD-only mode: keep current UI state when remote deletion fails.
@@ -684,7 +750,14 @@ export default function App() {
       {openedSubject && generatedPath && (
         <section role="main" aria-label="Parcours de révision" className="revision-page">
           <div className="revision-topbar">
-            <button type="button" className="button secondary" onClick={() => setOpenedSubject(null)}>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => {
+                openWorkspaceToken.current += 1;
+                setOpenedSubject(null);
+              }}
+            >
               Retour aux sujets
             </button>
             <button type="button" className="delete-button" onClick={handleDeleteOpenedSubject}>
